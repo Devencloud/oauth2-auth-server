@@ -182,75 +182,87 @@ Every auth event is persisted asynchronously to MySQL:
 
 ## Running Locally
 
-### Prerequisites
-
+**Prerequisites**
 - Java 21
 - Maven
 - Docker
 
-### Step 1 — Start infrastructure
-
-## Running Locally
-
-### Prerequisites
-
-- Java 21
-- Maven
-- Docker
-
-### Step 1 — Start infrastructure
+**Step 1 — Start infrastructure**
 
 ```bash
 docker-compose up -d
+```
+
 This starts MySQL on port 3307 and Redis on port 6380.
 
-Step 2 — Start Auth Server
-bash
+**Step 2 — Start Auth Server**
+
+```bash
 cd auth-server
 cp src/main/resources/application.properties.template src/main/resources/application.properties
 mvn spring-boot:run
-Step 3 — Start Gateway
-bash
+```
+
+**Step 3 — Start Gateway**
+
+```bash
 cd gateway
 cp src/main/resources/application.yml.template src/main/resources/application.yml
 mvn spring-boot:run
-Step 4 — Start Resource Server
-bash
+```
+
+**Step 4 — Start Resource Server**
+
+```bash
 cd resource-server
 cp src/main/resources/application.properties.template src/main/resources/application.properties
 mvn spring-boot:run
-Step 5 — Access the application
-Go to http://localhost:8081/api/me — you will be redirected to login.
+```
 
-API Endpoints
-Endpoint	Method	Access	Description
-/api/me	GET	Any authenticated user	Returns current user info from JWT
-/api/admin/dashboard	GET	ROLE_ADMIN only	Admin-only endpoint
-/oauth2/token	POST	Client credentials	Token endpoint
-/oauth2/introspect	POST	Client credentials	Token introspection
-/oauth2/revoke	POST	Client credentials	Token revocation
-/.well-known/openid-configuration	GET	Public	OIDC discovery endpoint
-/logout	GET	Authenticated	Clears session and SSO
-What I Would Add in Production
-Feature	Purpose
-🔐 Keycloak federation	Allow users to log in via external identity providers (Google, corporate SSO)
-🔐 HashiCorp Vault	Replace hardcoded secrets with dynamic secret injection
-🔐 mTLS	Mutual TLS for service-to-service authentication
-🔐 PKCE enforcement	Already implemented for public clients; enforce for all clients in production
-🔐 Scope-based access control	Fine-grained permissions beyond roles (read, write, admin scopes)
-🔐 OWASP ZAP scanning	Automated vulnerability scanning in CI/CD pipeline
-The Interview Answer
-"How do you revoke a JWT that's already been issued?"
+**Step 5 — Access the application**
+
+Go to `http://localhost:8081/api/me` — you will be redirected to login.
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | Access | Description |
+|---|---|---|---|
+| `/api/me` | GET | Any authenticated user | Returns current user info from JWT |
+| `/api/admin/dashboard` | GET | ROLE_ADMIN only | Admin-only endpoint |
+| `/oauth2/token` | POST | Client credentials | Token endpoint |
+| `/oauth2/introspect` | POST | Client credentials | Token introspection |
+| `/oauth2/revoke` | POST | Client credentials | Token revocation |
+| `/.well-known/openid-configuration` | GET | Public | OIDC discovery endpoint |
+| `/logout` | GET | Authenticated | Clears session and SSO |
+
+---
+
+## What I Would Add in Production
+
+- **Keycloak federation** — allow users to log in via external identity providers (Google, corporate SSO)
+- **HashiCorp Vault** — replace hardcoded secrets with dynamic secret injection
+- **mTLS** — mutual TLS for service-to-service authentication
+- **PKCE enforcement** — already implemented for public clients; would enforce for all clients in production
+- **Scope-based access control** — fine-grained permissions beyond roles (read, write, admin scopes)
+- **OWASP ZAP scanning** — automated vulnerability scanning in CI/CD pipeline
+
+---
+
+## The Interview Answer
+
+> *"How do you revoke a JWT that's already been issued?"*
+
 Stateless JWTs cannot be revoked natively — that is the fundamental tension. I solved it with two layers:
 
-Layer 1 — JTI Blacklisting
+**Layer 1 — JTI Blacklisting**
 
-Every JWT gets a unique ID (jti claim). The resource server checks Redis for blacklisted_jti:<jti> on every request. If the key exists, the request is rejected regardless of token validity or expiry.
+Every JWT gets a unique ID (`jti` claim). The resource server checks Redis for `blacklisted_jti:<jti>` on every request. If the key exists, the request is rejected regardless of token validity or expiry.
 
-Layer 2 — User-Level Kill Switch
+**Layer 2 — User-Level Kill Switch**
 
-On refresh token reuse detection, a revoked_user:<email> key is set in Redis. This blocks all requests from that user instantly — even tokens whose JTIs have not been individually blacklisted yet.
+On refresh token reuse detection, a `revoked_user:<email>` key is set in Redis. This blocks all requests from that user instantly — even tokens whose JTIs have not been individually blacklisted yet.
 
 The two-layer approach handles the race condition where an attacker generates new tokens faster than individual JTIs can be blacklisted.
-
 
