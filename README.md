@@ -190,6 +190,16 @@ Every auth event is persisted asynchronously to MySQL:
 
 ### Step 1 — Start infrastructure
 
+## Running Locally
+
+### Prerequisites
+
+- Java 21
+- Maven
+- Docker
+
+### Step 1 — Start infrastructure
+
 ```bash
 docker-compose up -d
 This starts MySQL on port 3307 and Redis on port 6380.
