@@ -17,9 +17,11 @@ This is not a tutorial implementation — it solves a real security problem that
 
 JWTs are stateless by design. Once issued, they are valid until expiry — you cannot invalidate them. This creates a real security gap:
 
-- ❌ A stolen refresh token can silently generate new access tokens indefinitely
-- ❌ Logging out does not actually revoke tokens
-- ❌ There is no native way to kill a user's session in a stateless system
+| Problem | Impact |
+|---------|--------|
+| Stolen refresh token | Can silently generate new access tokens indefinitely |
+| Logout | Does not actually revoke tokens |
+| Stateless system | No native way to kill a user's session |
 
 **This project solves all three problems.**
 
@@ -66,16 +68,19 @@ text
 This is the most important flow in the system. When a refresh token is stolen and used by an attacker:
 
 ### Step 1 — Legitimate user uses refresh token
+
 - Auth server issues new access token + new refresh token (rotation)
 - Old refresh token is hashed with SHA-256 and stored in Redis as `used_rt:<hash>`
 - Redis key stores the principal name with 8-day TTL
 
 ### Step 2 — Attacker uses the same old refresh token
+
 - Auth server looks up `used_rt:<hash>` in Redis
 - Finds the principal name — **reuse detected**
 - Triggers nuclear revocation immediately
 
 ### Step 3 — Nuclear revocation fires
+
 - Sets `revoked_user:<email>` in Redis — user-level kill switch
 - Queries all active sessions from MySQL for this user
 - Extracts JTI from every active access token
@@ -84,6 +89,7 @@ This is the most important flow in the system. When a refresh token is stolen an
 - Logs `REFRESH_TOKEN_REUSE` event to audit table
 
 ### Step 4 — Resource Server enforces the revocation
+
 - Every incoming request checks Redis for `blacklisted_jti:<jti>`
 - Every incoming request checks Redis for `revoked_user:<email>`
 - If either key exists → `401 Unauthorized` immediately
@@ -100,28 +106,37 @@ text
 ## Features
 
 ### Authorization Server
-- ✅ OAuth2 Authorization Code Flow
-- ✅ Refresh token rotation — new refresh token issued on every use
-- ✅ Refresh token reuse detection with automatic full session revocation
-- ✅ JTI blacklisting in Redis for individual token invalidation
-- ✅ User-level kill switch in Redis for instant full revocation
-- ✅ RSA-signed JWTs using a JKS keystore
-- ✅ BCrypt-hashed client secrets
-- ✅ Custom JWT claims — email and roles embedded in access token
-- ✅ Async audit logging of all auth events to MySQL
+
+| Feature | Description |
+|---------|-------------|
+| OAuth2 Authorization Code Flow | Standard OAuth2 flow for user authentication |
+| Refresh token rotation | New refresh token issued on every use |
+| Reuse detection | Automatic full session revocation on attack |
+| JTI blacklisting | Individual token invalidation in Redis |
+| User-level kill switch | Instant full revocation in Redis |
+| RSA-signed JWTs | Using a JKS keystore |
+| BCrypt-hashed secrets | Secure client secret storage |
+| Custom JWT claims | Email and roles embedded in access token |
+| Async audit logging | All auth events to MySQL |
 
 ### Gateway
-- ✅ Spring Cloud Gateway with OAuth2 login
-- ✅ Redis-backed session management (30 min timeout)
-- ✅ Rate limiting per authenticated user (5 req/sec, burst 10)
-- ✅ Token relay to downstream services
-- ✅ OIDC-compliant logout — clears gateway session and SSO session on auth server
+
+| Feature | Description |
+|---------|-------------|
+| Spring Cloud Gateway | OAuth2 login integration |
+| Redis-backed sessions | 30 minute timeout |
+| Rate limiting | 5 req/sec per user, burst 10 |
+| Token relay | To downstream services |
+| OIDC-compliant logout | Clears gateway and SSO session |
 
 ### Resource Server
-- ✅ JWT validation using auth server's RSA public key
-- ✅ JTI blacklist check on every request via Redis
-- ✅ User-level revocation check on every request via Redis
-- ✅ Role-based access control — `ROLE_USER` and `ROLE_ADMIN`
+
+| Feature | Description |
+|---------|-------------|
+| JWT validation | Using auth server's RSA public key |
+| JTI blacklist check | On every request via Redis |
+| User revocation check | On every request via Redis |
+| Role-based access control | `ROLE_USER` and `ROLE_ADMIN` |
 
 ## Redis Key Structure
 
@@ -137,7 +152,7 @@ text
 Every auth event is persisted asynchronously to MySQL:
 
 | Event Type | When It Fires |
-|------------|---------------|
+|------------|----------------|
 | `TOKEN_ISSUED` | Every login and every refresh token use |
 | `TOKEN_ROTATION` | When refresh token is rotated (old → new) |
 | `REFRESH_TOKEN_REUSE` | When a used refresh token is submitted again |
@@ -207,18 +222,13 @@ Endpoint	Method	Access	Description
 /.well-known/openid-configuration	GET	Public	OIDC discovery endpoint
 /logout	GET	Authenticated	Clears session and SSO
 What I Would Add in Production
-🔐 Keycloak federation — allow users to log in via external identity providers (Google, corporate SSO)
-
-🔐 HashiCorp Vault — replace hardcoded secrets with dynamic secret injection
-
-🔐 mTLS — mutual TLS for service-to-service authentication
-
-🔐 PKCE enforcement — already implemented for public clients; would enforce for all clients in production
-
-🔐 Scope-based access control — fine-grained permissions beyond roles (read, write, admin scopes)
-
-🔐 OWASP ZAP scanning — automated vulnerability scanning in CI/CD pipeline
-
+Feature	Purpose
+🔐 Keycloak federation	Allow users to log in via external identity providers (Google, corporate SSO)
+🔐 HashiCorp Vault	Replace hardcoded secrets with dynamic secret injection
+🔐 mTLS	Mutual TLS for service-to-service authentication
+🔐 PKCE enforcement	Already implemented for public clients; enforce for all clients in production
+🔐 Scope-based access control	Fine-grained permissions beyond roles (read, write, admin scopes)
+🔐 OWASP ZAP scanning	Automated vulnerability scanning in CI/CD pipeline
 The Interview Answer
 "How do you revoke a JWT that's already been issued?"
 Stateless JWTs cannot be revoked natively — that is the fundamental tension. I solved it with two layers:
