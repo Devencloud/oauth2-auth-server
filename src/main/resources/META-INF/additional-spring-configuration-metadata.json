@@ -1,0 +1,27 @@
+{"properties": [
+  {
+    "name": "project.jwt.secret",
+    "type": "java.lang.String",
+    "description": "A description for 'project.jwt.secret'"
+  },
+  {
+    "name": "project.jwt.expiration",
+    "type": "java.lang.String",
+    "description": "A description for 'project.jwt.expiration'"
+  },
+  {
+    "name": "spring.security.oauth2.authorizationserver.keystore.location",
+    "type": "java.lang.String",
+    "description": "A description for 'spring.security.oauth2.authorizationserver.keystore.location'"
+  },
+  {
+    "name": "spring.security.oauth2.authorizationserver.keystore.password",
+    "type": "java.lang.String",
+    "description": "A description for 'spring.security.oauth2.authorizationserver.keystore.password'"
+  },
+  {
+    "name": "spring.security.oauth2.authorizationserver.keystore.alias",
+    "type": "java.lang.String",
+    "description": "A description for 'spring.security.oauth2.authorizationserver.keystore.alias'"
+  }
+]}

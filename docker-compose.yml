@@ -1,0 +1,26 @@
+
+
+services:
+  auth-db:
+    image: mysql:8.0
+    container_name: auth-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: auth_db
+      MYSQL_USER: auth_user
+      MYSQL_PASSWORD: Random214@#
+    ports:
+      - "3307:3306"
+    volumes:
+      - auth_mysql_data:/var/lib/mysql
+
+  auth-redis:
+    image: redis:7
+    container_name: auth-redis
+    ports:
+      - "6380:6379"
+    restart: always
+
+volumes:
+  auth_mysql_data:
