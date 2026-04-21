@@ -1,134 +1,160 @@
-OAuth2 Authorization Server — Refresh Token Reuse Detection
+<div align="center">
+🔐 OAuth2 Authorization Server
+Refresh Token Reuse Detection & Nuclear Session Revocation
+<br/>
+Show Image
+Show Image
+Show Image
+Show Image
+Show Image
+Show Image
+<br/>
 
 Production-grade OAuth2 Authorization Server built from scratch using Spring Authorization Server.
-This is not a tutorial implementation — it solves a real security problem that stateless JWT systems face in production:
+This is not a tutorial — it solves a real security problem that stateless JWT systems face in production.
+
+<br/>
 "How do you revoke a token that was designed to be unrevocable?"
+<br/>
+</div>
 
+📦 Related Repositories
+RepositoryDescriptionoauth2-gatewaySpring Cloud Gateway — session management, rate limiting, OIDC logoutoauth2-resource-serverProtected API — JTI blacklist enforcement, role-based access control
 
-Related Repositories
-RepositoryDescriptionoauth2-gatewaySpring Cloud Gateway with session management, rate limiting, and OIDC logoutoauth2-resource-serverProtected API with JTI blacklist enforcement and role-based access control
-
-The Core Problem
-JWTs are stateless by design. Once issued, they are valid until expiry — there is no native way to invalidate them. This creates a serious security gap:
-ProblemImpactStolen refresh tokenSilently generates new access tokens indefinitelyLogoutDoes not actually revoke tokensStateless architectureNo native mechanism to kill a user's session
+⚠️ The Core Problem
+JWTs are stateless by design. Once issued, they are valid until expiry — there is no native way to invalidate them. This creates a serious security gap in any token-based system:
+ProblemImpact🔑 Stolen refresh tokenSilently generates new access tokens indefinitely🚪 LogoutDoes not actually revoke issued tokens🌐 Stateless architectureNo built-in mechanism to kill a live session
 This project solves all three.
 
-System Architecture
-┌─────────┐
-│ Browser │
-└────┬────┘
-     │
-     ▼
-┌───────────┐    PORT 8081
-│  Gateway  │──  OAuth2 Login · Redis Sessions · Rate Limiting · OIDC Logout
-└─────┬─────┘
-      │
-      ├──────────────────────────────────┐
-      │                                  │
-      ▼                                  ▼
-┌───────────┐    PORT 9000          ┌───────────────┐    PORT 8082
-│   Auth    │──  JWT Issuance       │   Resource    │──  JWT Validation
-│  Server   │    Refresh Rotation   │    Server     │    JTI Blacklist
-│           │    Reuse Detection    │               │    User Revocation
-│           │    MySQL + Redis      │               │    Role-based Access
-└───────────┘                       └───────────────┘
-ComponentPortResponsibilitiesGateway8081OAuth2 login, Redis session management, rate limiting, OIDC logoutAuth Server9000Issues JWTs (5 min TTL), issues refresh tokens (7 day TTL), detects reuse, revokes sessionsResource Server8082Validates JWT signatures, enforces JTI blacklist and user revocation via Redis
+🏗️ System Architecture
+                        ┌─────────┐
+                        │ Browser │
+                        └────┬────┘
+                             │
+                             ▼
+              ┌──────────────────────────┐
+              │        GATEWAY           │  :8081
+              │  OAuth2 Login            │
+              │  Redis Session Store     │
+              │  Rate Limiting (5 rps)   │
+              │  OIDC Logout             │
+              └──────────┬───────────────┘
+                         │
+           ┌─────────────┴──────────────┐
+           │                            │
+           ▼                            ▼
+┌─────────────────────┐    ┌──────────────────────────┐
+│    AUTH SERVER       │    │     RESOURCE SERVER       │
+│      :9000           │    │         :8082             │
+│                      │    │                           │
+│  Issues JWTs         │    │  Validates JWT signature  │
+│  5 min access TTL    │    │  Checks JTI blacklist     │
+│  7 day refresh TTL   │    │  Checks user revocation   │
+│  Refresh rotation    │    │  Role-based access (RBAC) │
+│  Reuse detection     │    │                           │
+│  Nuclear revocation  │    └──────────────────────────┘
+│                      │
+│  MySQL  <->  Redis   │
+└──────────────────────┘
+ComponentPortStorageKey ResponsibilitiesGateway8081RedisOAuth2 login, session management, rate limiting, OIDC logoutAuth Server9000MySQL + RedisJWT issuance, refresh rotation, reuse detection, revocationResource Server8082Redis (read)JWT validation, blacklist enforcement, RBAC
 
-Refresh Token Reuse Detection
-This is the most critical flow in the system. When a refresh token is stolen and replayed by an attacker:
-Step 1 — Legitimate User Rotates Token
+🚨 Refresh Token Reuse Attack — Full Flow
 
-Auth server issues a new access token and a new refresh token
-The old refresh token is SHA-256 hashed and stored in Redis as used_rt:<hash>
-Redis key stores the principal name with an 8-day TTL
+This is the most important flow in the system.
+When a refresh token is stolen and replayed by an attacker, here is exactly what happens:
 
-Step 2 — Attacker Replays the Old Token
+<br/>
+Step 1 — Legitimate User Rotates Their Token
+
+Auth server issues a new access token + new refresh token
+Old refresh token is SHA-256 hashed and stored in Redis as used_rt:<hash>
+Redis key holds the principal name with an 8-day TTL
+
+Step 2 — Attacker Replays the Old Refresh Token
 
 Auth server looks up used_rt:<hash> in Redis
-Finds the principal name — reuse detected
-Nuclear revocation fires immediately
+Finds the principal name associated with it
+Reuse detected → nuclear revocation triggers immediately
 
-Step 3 — Nuclear Revocation
+Step 3 — ☢️ Nuclear Revocation Fires
 
-Sets revoked_user:<email> in Redis — a user-level kill switch
+revoked_user:<email> set in Redis (user-level kill switch)
 Queries all active sessions from MySQL for this user
-Extracts the JTI from every active access token
-Sets blacklisted_jti:<jti> in Redis for each token
-Removes all authorizations from the database
-Writes a REFRESH_TOKEN_REUSE event to the audit log
+Extracts the jti from every active access token
+blacklisted_jti:<jti> set in Redis for each token individually
+All authorizations purged from the database
+REFRESH_TOKEN_REUSE event written to the audit log
 
-Step 4 — Resource Server Enforces Revocation
+Step 4 — Resource Server Enforces the Revocation
 
-Every incoming request checks blacklisted_jti:<jti> in Redis
-Every incoming request checks revoked_user:<email> in Redis
-If either key exists → 401 Unauthorized — token never reaches the controller
+Every request checks Redis for blacklisted_jti:<jti>
+Every request checks Redis for revoked_user:<email>
+Either key present → 401 Unauthorized immediately
+Token never reaches the controller
 
-Redis State After a Reuse Attack
-revoked_user:user1@gmail.com          →  "revoked"        (30 min TTL)
-blacklisted_jti:3ab9977f-c21f-...     →  "revoked"        (30 min TTL)
-blacklisted_jti:2478c7f8-a5c2-...     →  "revoked"        (30 min TTL)
-used_rt:7d5643b845d071b89f84...       →  "user1@gmail.com" (8 day TTL)
+🗂️ Redis State After a Reuse Attack
+revoked_user:user1@gmail.com          →  "revoked"          TTL: 30 min
+blacklisted_jti:3ab9977f-c21f-...     →  "revoked"          TTL: 30 min
+blacklisted_jti:2478c7f8-a5c2-...     →  "revoked"          TTL: 30 min
+used_rt:7d5643b845d071b89f84...       →  "user1@gmail.com"  TTL: 8 days
 
-Features
+✅ Features
 Authorization Server
-FeatureDescriptionOAuth2 Authorization Code FlowStandard OAuth2 flow for user authenticationRefresh token rotationNew refresh token issued on every useReuse detectionFull session revocation triggered automatically on attackJTI blacklistingIndividual token invalidation via RedisUser-level kill switchInstant blanket revocation via RedisRSA-signed JWTsSigned using a JKS keystore (RS256)BCrypt-hashed secretsSecure client secret storageCustom JWT claimsEmail and roles embedded in every access tokenAsync audit loggingAll auth events persisted to MySQL asynchronously
+FeatureDetailOAuth2 Authorization Code FlowStandard OAuth2 flow for user authenticationRefresh token rotationNew refresh token issued on every use, old one invalidatedReuse detectionFull session revocation triggered automatically on attackJTI blacklistingPer-token invalidation stored in RedisUser-level kill switchInstant blanket revocation via revoked_user:<email>RSA-signed JWTsRS256 via JKS keystoreBCrypt-hashed secretsSecure client secret storageCustom JWT claimsemail and roles embedded in every access tokenAsync audit loggingAll auth events written to MySQL off the request thread
 Gateway
-FeatureDescriptionSpring Cloud GatewayOAuth2 login integrationRedis-backed sessions30-minute timeoutRate limiting5 req/sec per user, burst of 10Token relayForwards tokens to downstream servicesOIDC-compliant logoutClears both gateway and SSO session
+FeatureDetailSpring Cloud GatewayFull OAuth2 login integrationRedis-backed sessions30-minute sliding timeoutRate limiting5 req/sec per user, burst of 10Token relayAccess token forwarded to downstream servicesOIDC-compliant logoutClears gateway session and auth server SSO session
 Resource Server
-FeatureDescriptionJWT validationVerified using the auth server's RSA public keyJTI blacklist checkChecked on every request via RedisUser revocation checkChecked on every request via RedisRole-based access controlROLE_USER and ROLE_ADMIN
+FeatureDetailJWT signature validationVerified against auth server's RSA public keyJTI blacklist checkOn every request — before any business logicUser revocation checkOn every request — instant kill switch enforcementRole-based access controlROLE_USER and ROLE_ADMIN enforced at endpoint level
 
-Redis Key Structure
-Key PatternValueTTLPurposeused_rt:<sha256_hash>principal name8 daysMarks a rotated refresh token as usedrevoked_user:<email>"revoked"30 minUser-level kill switch after a reuse attackblacklisted_jti:<jti>"revoked"30 minIndividual access token blacklist entryspring:session:sessions:<id>session data30 minGateway session store (Spring Session)
+🗃️ Redis Key Reference
+Key PatternValueTTLPurposeused_rt:<sha256_hash>principal name8 daysMarks a rotated refresh token as consumedrevoked_user:<email>"revoked"30 minUser-level kill switch — blocks all requestsblacklisted_jti:<jti>"revoked"30 minPer-token blacklist entryspring:session:sessions:<id>session blob30 minGateway session store via Spring Session
 
-Audit Log
-Every auth event is persisted asynchronously to MySQL:
-Event TypeTriggerTOKEN_ISSUEDEvery login and every successful refresh token useTOKEN_ROTATIONWhen a refresh token is rotated (old → new)REFRESH_TOKEN_REUSEWhen a previously used refresh token is submitted again
+📋 Audit Log Events
+Every auth event is persisted asynchronously to MySQL — zero impact on request latency:
+EventTriggerTOKEN_ISSUEDEvery successful login and every refresh token useTOKEN_ROTATIONWhen a refresh token is rotated (old → new recorded)REFRESH_TOKEN_REUSEWhen a previously consumed refresh token is submitted again
 
-Token Configuration
-ParameterValueAccess Token TTL5 minutesRefresh Token TTL7 daysRefresh Token ReuseDisabled — rotation enforcedSigning AlgorithmRS256 (RSA)Client Authenticationclient_secret_basic
+⚙️ Token Configuration
+ParameterValueAccess Token TTL5 minutesRefresh Token TTL7 daysRefresh Token ReuseDisabled — rotation enforcedSigning AlgorithmRS256 (RSA asymmetric)Client Authenticationclient_secret_basic
 
-Tech Stack
-LayerTechnologyAuthorization ServerSpring Authorization Server 1.xGatewaySpring Cloud Gateway (WebFlux)Resource ServerSpring Security OAuth2 Resource ServerDatabaseMySQL 8Cache / BlacklistRedis 7Session StoreSpring Session RedisToken FormatJWT (RS256)InfrastructureDocker Compose
+🛠️ Tech Stack
+LayerTechnologyAuthorization ServerSpring Authorization Server 1.xGatewaySpring Cloud Gateway (WebFlux / reactive)Resource ServerSpring Security OAuth2 Resource ServerDatabaseMySQL 8Cache / BlacklistRedis 7Session StoreSpring Session with RedisToken FormatJWT — RS256 signedInfrastructureDocker Compose
 
-Running Locally
-Prerequisites
-
-Java 21
-Maven
-Docker
-
+🚀 Running Locally
+Prerequisites: Java 21 · Maven · Docker
 Step 1 — Start Infrastructure
 bashdocker-compose up -d
-Starts MySQL on port 3307 and Redis on port 6380.
-Step 2 — Start Auth Server
+
+Starts MySQL on :3307 and Redis on :6380
+
+Step 2 — Auth Server
 bashcd auth-server
 cp src/main/resources/application.properties.template src/main/resources/application.properties
 mvn spring-boot:run
-Step 3 — Start Gateway
+Step 3 — Gateway
 bashcd gateway
 cp src/main/resources/application.yml.template src/main/resources/application.yml
 mvn spring-boot:run
-Step 4 — Start Resource Server
+Step 4 — Resource Server
 bashcd resource-server
 cp src/main/resources/application.properties.template src/main/resources/application.properties
 mvn spring-boot:run
-Step 5 — Access the Application
-Navigate to http://localhost:8081/api/me — you will be redirected to the login page.
+Step 5 — Open the App
+Navigate to http://localhost:8081/api/me — you will be redirected to the login page automatically.
 
-API Endpoints
-EndpointMethodAccessDescription/api/meGETAny authenticated userReturns current user info from JWT/api/admin/dashboardGETROLE_ADMIN onlyAdmin-only protected endpoint/oauth2/tokenPOSTClient credentialsToken endpoint/oauth2/introspectPOSTClient credentialsToken introspection/oauth2/revokePOSTClient credentialsToken revocation/.well-known/openid-configurationGETPublicOIDC discovery endpoint/logoutGETAuthenticatedClears gateway session and SSO
+🔌 API Endpoints
+EndpointMethodAccessDescription/api/meGETAuthenticatedReturns current user info decoded from JWT/api/admin/dashboardGETROLE_ADMINAdmin-only protected endpoint/oauth2/tokenPOSTClient credentialsToken issuance endpoint/oauth2/introspectPOSTClient credentialsToken introspection/oauth2/revokePOSTClient credentialsToken revocation/.well-known/openid-configurationGETPublicOIDC discovery document/logoutGETAuthenticatedClears gateway session and SSO session
 
-Production Roadmap
-EnhancementRationaleKeycloak federationAllow login via external identity providers (Google, corporate SSO)HashiCorp VaultReplace hardcoded secrets with dynamic secret injectionmTLSMutual TLS for service-to-service authenticationPKCE enforcementAlready implemented for public clients; enforce for all clientsScope-based access controlFine-grained permissions beyond roles (read, write, admin)OWASP ZAP scanningAutomated vulnerability scanning integrated into CI/CD pipeline
+🗺️ Production Roadmap
+EnhancementRationaleKeycloak federationExternal IdP support — Google, corporate SSOHashiCorp VaultReplace hardcoded secrets with dynamic injectionmTLSMutual TLS for all service-to-service callsPKCE enforcementAlready live for public clients — enforce globallyScope-based access controlFine-grained permissions: read, write, adminOWASP ZAP scanningAutomated vulnerability scans in CI/CD pipeline
 
-The Interview Answer
+💬 The Interview Answer
 
 "How do you revoke a JWT that's already been issued?"
 
-Stateless JWTs cannot be revoked natively — that is the fundamental tension. This system solves it with two independent layers:
-Layer 1 — JTI Blacklisting
-Every JWT carries a unique jti claim. The resource server checks Redis for blacklisted_jti:<jti> on every single request. If the key exists, the request is rejected regardless of token validity or expiry.
-Layer 2 — User-Level Kill Switch
-On refresh token reuse detection, a revoked_user:<email> key is set in Redis. This blocks all requests from that user instantly — including tokens whose JTIs have not yet been individually blacklisted.
-The two-layer approach handles the race condition where an attacker generates new tokens faster than individual JTIs can be blacklisted.
+Stateless JWTs cannot be revoked natively — that is the fundamental tension. This system resolves it with two independent enforcement layers:
+🔹 Layer 1 — JTI Blacklisting
+Every JWT carries a unique jti claim. The resource server checks Redis for blacklisted_jti:<jti> on every single request. If the key exists, the request is rejected — regardless of token validity or remaining TTL.
+🔹 Layer 2 — User-Level Kill Switch
+On refresh token reuse detection, revoked_user:<email> is written to Redis. This blocks all requests from that user instantly — including tokens whose JTIs have not yet been individually blacklisted.
 
+The two-layer approach handles the race condition where an attacker generates new tokens faster than individual JTIs can be blacklisted. The user-level key acts as a net that catches everything.
