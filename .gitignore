@@ -34,12 +34,12 @@ build/
 
 
 # Keystore - never push
-*.jks
+
 *.p12
 *.keystore
 
 # Sensitive properties
-src/main/resources/application.properties
+
 
 # Logs
 *.log
