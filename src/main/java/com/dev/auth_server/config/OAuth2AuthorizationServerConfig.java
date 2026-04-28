@@ -103,7 +103,7 @@ public class OAuth2AuthorizationServerConfig {
     @Bean
     public AuthorizationServerSettings authorizationServerSettings() {
         return AuthorizationServerSettings.builder()
-                .issuer("http://localhost:9000")
+                .issuer("https://oauth2-auth-server-production.up.railway.app")
                 .build();
     }
 
