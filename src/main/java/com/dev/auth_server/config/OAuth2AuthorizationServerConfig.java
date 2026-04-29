@@ -53,7 +53,7 @@ public class OAuth2AuthorizationServerConfig {
             HttpSecurity http,
             DaoAuthenticationProvider daoAuthProvider) throws Exception {
 
-        http.securityMatcher("/oauth2/**");
+        http.securityMatcher("/oauth2/**","/connect/**");
 
         OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
 
